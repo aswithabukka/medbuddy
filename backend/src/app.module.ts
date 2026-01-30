@@ -12,6 +12,7 @@ import { UsersModule } from './users/users.module';
 import { PatientsModule } from './patients/patients.module';
 import { SpecialtiesModule } from './specialties/specialties.module';
 import { DoctorsModule } from './doctors/doctors.module';
+import { AppointmentsModule } from './appointments/appointments.module';
 
 @Module({
   imports: [
@@ -40,6 +41,8 @@ import { DoctorsModule } from './doctors/doctors.module';
     SpecialtiesModule,
 
     DoctorsModule,
+
+    AppointmentsModule,
 
     // Feature modules will be added here
     // UsersModule,
