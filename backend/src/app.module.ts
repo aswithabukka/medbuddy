@@ -1,10 +1,13 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_FILTER } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
+import { AuthModule } from './auth/auth.module';
+import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
+import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 
 @Module({
   imports: [
@@ -23,8 +26,10 @@ import { PrismaModule } from './prisma/prisma.module';
     // Prisma database module (global)
     PrismaModule,
 
+    // Authentication module
+    AuthModule,
+
     // Feature modules will be added here
-    // AuthModule,
     // UsersModule,
     // PatientsModule,
     // DoctorsModule,
@@ -34,6 +39,16 @@ import { PrismaModule } from './prisma/prisma.module';
   controllers: [AppController],
   providers: [
     AppService,
+    // Global JWT authentication guard (can be bypassed with @Public() decorator)
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
+    // Global exception filter
+    {
+      provide: APP_FILTER,
+      useClass: AllExceptionsFilter,
+    },
     // Uncomment when rate limiting is fully configured
     // {
     //   provide: APP_GUARD,
