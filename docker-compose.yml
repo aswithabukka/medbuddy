@@ -1,0 +1,122 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: medbuddy-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: medbuddy
+      POSTGRES_PASSWORD: medbuddy_dev_password
+      POSTGRES_DB: medbuddy
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - medbuddy-network
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U medbuddy']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for caching, sessions, and queues
+  redis:
+    image: redis:7-alpine
+    container_name: medbuddy-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    networks:
+      - medbuddy-network
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend API (NestJS)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: medbuddy-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgresql://medbuddy:medbuddy_dev_password@postgres:5432/medbuddy?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: dev_jwt_secret_change_in_production
+      JWT_REFRESH_SECRET: dev_jwt_refresh_secret_change_in_production
+      JWT_ACCESS_EXPIRATION: 15m
+      JWT_REFRESH_EXPIRATION: 7d
+      # Email (SendGrid)
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      EMAIL_FROM: noreply@medbuddy.com
+      # AWS S3
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-medbuddy-dev}
+      # Twilio Video
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_API_KEY: ${TWILIO_API_KEY:-}
+      TWILIO_API_SECRET: ${TWILIO_API_SECRET:-}
+      # Firebase Cloud Messaging (Push Notifications)
+      FCM_SERVER_KEY: ${FCM_SERVER_KEY:-}
+    ports:
+      - '3000:3000'
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+      - /app/dist
+    networks:
+      - medbuddy-network
+    command: npm run start:dev
+
+  # Frontend Web (Next.js) - Optional for development
+  # Uncomment when frontend is ready
+  # frontend-web:
+  #   build:
+  #     context: ./frontend-web
+  #     dockerfile: Dockerfile
+  #     target: development
+  #   container_name: medbuddy-frontend-web
+  #   restart: unless-stopped
+  #   depends_on:
+  #     - backend
+  #   environment:
+  #     NODE_ENV: development
+  #     NEXT_PUBLIC_API_URL: http://localhost:3000
+  #   ports:
+  #     - '3001:3000'
+  #   volumes:
+  #     - ./frontend-web:/app
+  #     - /app/node_modules
+  #     - /app/.next
+  #   networks:
+  #     - medbuddy-network
+  #   command: npm run dev
+
+networks:
+  medbuddy-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local

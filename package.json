@@ -1,0 +1,37 @@
+{
+  "name": "medbuddy",
+  "version": "1.0.0",
+  "description": "Telemedicine consultation platform with web and mobile apps",
+  "private": true,
+  "scripts": {
+    "prepare": "husky",
+    "backend:dev": "cd backend && npm run start:dev",
+    "backend:build": "cd backend && npm run build",
+    "backend:test": "cd backend && npm run test",
+    "frontend-web:dev": "cd frontend-web && npm run dev",
+    "frontend-web:build": "cd frontend-web && npm run build",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f",
+    "prisma:generate": "cd backend && npx prisma generate",
+    "prisma:migrate": "cd backend && npx prisma migrate dev",
+    "prisma:studio": "cd backend && npx prisma studio"
+  },
+  "keywords": ["telemedicine", "healthcare", "consultation", "nestjs", "nextjs", "react-native"],
+  "author": "MedBuddy Team",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7"
+  },
+  "lint-staged": {
+    "backend/**/*.{js,ts}": [
+      "cd backend && npm run lint --fix",
+      "cd backend && npm run format"
+    ],
+    "frontend-web/**/*.{js,ts,tsx}": [
+      "cd frontend-web && npm run lint --fix",
+      "cd frontend-web && npm run format"
+    ]
+  }
+}

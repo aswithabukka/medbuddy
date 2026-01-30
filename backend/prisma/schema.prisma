@@ -1,0 +1,639 @@
+// MedBuddy - Telemedicine Platform Database Schema
+// Production-ready schema with RBAC, audit logging, and HIPAA considerations
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================
+// USERS & AUTHENTICATION
+// ============================================
+
+enum UserRole {
+  PATIENT
+  DOCTOR
+  ADMIN
+}
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  password      String   // Bcrypt hashed
+  role          UserRole
+  emailVerified Boolean  @default(false)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  patientProfile        PatientProfile?
+  doctorProfile         DoctorProfile?
+  refreshTokens         RefreshToken[]
+  passwordResetTokens   PasswordResetToken[]
+  auditLogs             AuditLog[]
+  supportTickets        SupportTicket[]
+  notifications         Notification[]
+  notificationPreference NotificationPreference?
+
+  @@index([email])
+  @@index([role])
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    // Hashed token for security
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique // Hashed token
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+}
+
+// ============================================
+// PATIENT PROFILE
+// ============================================
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
+enum BloodType {
+  A_POSITIVE
+  A_NEGATIVE
+  B_POSITIVE
+  B_NEGATIVE
+  AB_POSITIVE
+  AB_NEGATIVE
+  O_POSITIVE
+  O_NEGATIVE
+  UNKNOWN
+}
+
+model PatientProfile {
+  id           String     @id @default(uuid())
+  userId       String     @unique
+  dateOfBirth  DateTime?
+  gender       Gender?
+  height       Float?     // in cm
+  weight       Float?     // in kg
+  bloodType    BloodType? @default(UNKNOWN)
+  allergies    String?    @db.Text // Comma-separated or JSON
+  medications  String?    @db.Text // Current medications
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  user                User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conditions          PatientCondition[]
+  profileHistory      PatientProfileHistory[]
+  appointments        Appointment[]
+  medicalReports      MedicalReport[]
+  prescriptions       Prescription[]
+  reviews             Review[]
+
+  @@index([userId])
+}
+
+model PatientCondition {
+  id          String    @id @default(uuid())
+  patientId   String
+  condition   String    // e.g., "Diabetes Type 2", "Hypertension"
+  diagnosedAt DateTime?
+  notes       String?   @db.Text
+  createdAt   DateTime  @default(now())
+
+  patient PatientProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+}
+
+model PatientProfileHistory {
+  id            String   @id @default(uuid())
+  patientId     String
+  changedFields Json     // JSONB storing what changed
+  changedAt     DateTime @default(now())
+
+  patient PatientProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId, changedAt])
+}
+
+// ============================================
+// DOCTOR PROFILE
+// ============================================
+
+enum DoctorStatus {
+  PENDING    // Awaiting admin approval
+  APPROVED   // Verified and active
+  REJECTED   // Application rejected
+  SUSPENDED  // Temporarily suspended
+  INACTIVE   // Deactivated
+}
+
+model DoctorProfile {
+  id               String       @id @default(uuid())
+  userId           String       @unique
+  fullName         String
+  qualifications   String       @db.Text // e.g., "MBBS, MD (Cardiology)"
+  experience       Int          // Years of experience
+  consultationFee  Float        // Fee in currency
+  timezone         String       @default("UTC") // e.g., "America/New_York"
+  status           DoctorStatus @default(PENDING)
+  bio              String?      @db.Text
+  clinicName       String?
+  clinicAddress    String?
+  licenseNumber    String?      // Medical license number
+  verifiedAt       DateTime?
+  rejectionReason  String?      @db.Text
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  user                  User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  specialties           DoctorSpecialty[]
+  languages             DoctorLanguage[]
+  availabilityTemplates DoctorAvailabilityTemplate[]
+  unavailableDates      DoctorUnavailableDate[]
+  appointments          Appointment[]
+  consultationNotes     ConsultationNote[]
+  prescriptions         Prescription[]
+  reviews               Review[]
+  followUpRecommendations FollowUpRecommendation[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model Specialty {
+  id          String   @id @default(uuid())
+  name        String   @unique // e.g., "Cardiology", "Dermatology"
+  description String?  @db.Text
+  createdAt   DateTime @default(now())
+
+  doctors DoctorSpecialty[]
+
+  @@index([name])
+}
+
+model DoctorSpecialty {
+  id          String   @id @default(uuid())
+  doctorId    String
+  specialtyId String
+  isPrimary   Boolean  @default(false) // One primary specialty
+  createdAt   DateTime @default(now())
+
+  doctor    DoctorProfile @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  specialty Specialty     @relation(fields: [specialtyId], references: [id], onDelete: Cascade)
+
+  @@unique([doctorId, specialtyId])
+  @@index([doctorId])
+  @@index([specialtyId])
+}
+
+model DoctorLanguage {
+  id        String   @id @default(uuid())
+  doctorId  String
+  language  String   // e.g., "English", "Spanish", "Hindi"
+  createdAt DateTime @default(now())
+
+  doctor DoctorProfile @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@unique([doctorId, language])
+  @@index([doctorId])
+}
+
+// ============================================
+// AVAILABILITY & SCHEDULING
+// ============================================
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+model DoctorAvailabilityTemplate {
+  id        String    @id @default(uuid())
+  doctorId  String
+  dayOfWeek DayOfWeek
+  startTime String    // HH:MM format (e.g., "09:00")
+  endTime   String    // HH:MM format (e.g., "17:00")
+  createdAt DateTime  @default(now())
+
+  doctor DoctorProfile @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@index([doctorId, dayOfWeek])
+}
+
+model DoctorUnavailableDate {
+  id        String   @id @default(uuid())
+  doctorId  String
+  date      DateTime @db.Date
+  reason    String?  @db.Text
+  createdAt DateTime @default(now())
+
+  doctor DoctorProfile @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@index([doctorId, date])
+}
+
+// ============================================
+// APPOINTMENTS
+// ============================================
+
+enum AppointmentStatus {
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+model Appointment {
+  id              String            @id @default(uuid())
+  patientId       String
+  doctorId        String
+  scheduledAt     DateTime
+  durationMinutes Int               @default(30)
+  patientTimezone String            // Timezone of patient
+  doctorTimezone  String            // Timezone of doctor
+  status          AppointmentStatus @default(CONFIRMED)
+  consultationFee Float
+  cancelledAt     DateTime?
+  cancelReason    String?           @db.Text
+  completedAt     DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  patient                 PatientProfile           @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor                  DoctorProfile            @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  reminders               AppointmentReminder[]
+  consultationNote        ConsultationNote?
+  prescription            Prescription?
+  videoSession            VideoSession?
+  review                  Review?
+  followUpRecommendation  FollowUpRecommendation?
+  followUpFor             FollowUpRecommendation?  @relation("FollowUpAppointment")
+
+  @@unique([doctorId, scheduledAt]) // Prevent double booking
+  @@index([patientId, status])
+  @@index([doctorId, scheduledAt])
+  @@index([scheduledAt])
+}
+
+// For race condition prevention during booking
+model AppointmentSlotLock {
+  id        String   @id @default(uuid())
+  doctorId  String
+  slotStart DateTime
+  slotEnd   DateTime
+  lockedBy  String   // User ID who locked the slot
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@unique([doctorId, slotStart])
+  @@index([expiresAt]) // For cleanup of expired locks
+}
+
+// ============================================
+// REMINDERS & NOTIFICATIONS
+// ============================================
+
+enum ReminderType {
+  EMAIL
+  PUSH
+  SMS
+}
+
+enum ReminderStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model AppointmentReminder {
+  id            String         @id @default(uuid())
+  appointmentId String
+  reminderType  ReminderType
+  scheduledFor  DateTime       // When to send the reminder
+  status        ReminderStatus @default(PENDING)
+  sentAt        DateTime?
+  errorMessage  String?        @db.Text
+  retryCount    Int            @default(0)
+  createdAt     DateTime       @default(now())
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@index([status, scheduledFor])
+  @@index([appointmentId])
+}
+
+// ============================================
+// CONSULTATION NOTES (SOAP Format)
+// ============================================
+
+model ConsultationNote {
+  id            String    @id @default(uuid())
+  appointmentId String    @unique
+  doctorId      String
+  subjective    String?   @db.Text // Patient's complaints/symptoms
+  objective     String?   @db.Text // Doctor's observations
+  assessment    String?   @db.Text // Diagnosis/assessment
+  plan          String?   @db.Text // Treatment plan
+  isFinalized   Boolean   @default(false)
+  finalizedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  appointment Appointment   @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  doctor      DoctorProfile @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@index([appointmentId])
+  @@index([doctorId])
+}
+
+// ============================================
+// PRESCRIPTIONS
+// ============================================
+
+model Prescription {
+  id                 String   @id @default(uuid())
+  appointmentId      String   @unique
+  doctorId           String
+  patientId          String
+  prescriptionNumber String   @unique // Sequential number for tracking
+  notes              String?  @db.Text
+  digitalSignature   String?  // Base64 or URL to signature
+  issuedAt           DateTime @default(now())
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  appointment Appointment          @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  doctor      DoctorProfile        @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  patient     PatientProfile       @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  medicines   PrescriptionMedicine[]
+
+  @@index([appointmentId])
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([prescriptionNumber])
+}
+
+model PrescriptionMedicine {
+  id             String   @id @default(uuid())
+  prescriptionId String
+  medicineName   String
+  dosage         String   // e.g., "500mg"
+  frequency      String   // e.g., "Twice daily"
+  duration       String   // e.g., "7 days"
+  instructions   String?  @db.Text // e.g., "Take after meals"
+  createdAt      DateTime @default(now())
+
+  prescription Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+
+  @@index([prescriptionId])
+}
+
+// ============================================
+// MEDICAL REPORTS
+// ============================================
+
+enum ReportCategory {
+  LAB
+  PRESCRIPTION
+  SCAN
+  IMAGING
+  OTHER
+}
+
+model MedicalReport {
+  id         String         @id @default(uuid())
+  patientId  String
+  uploadedBy String         // User ID (patient or doctor)
+  category   ReportCategory @default(OTHER)
+  fileName   String
+  fileUrl    String         // S3 URL or path
+  fileSize   Int            // in bytes
+  mimeType   String         // e.g., "application/pdf", "image/jpeg"
+  notes      String?        @db.Text
+  reportDate DateTime?      @db.Date // Date of the report/test
+  uploadedAt DateTime       @default(now())
+
+  patient       PatientProfile        @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  accessLogs    MedicalReportAccess[]
+
+  @@index([patientId])
+  @@index([uploadedAt])
+}
+
+model MedicalReportAccess {
+  id         String   @id @default(uuid())
+  reportId   String
+  accessedBy String   // User ID
+  accessedAt DateTime @default(now())
+  ipAddress  String?
+
+  report MedicalReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId, accessedAt])
+  @@index([accessedBy])
+}
+
+// ============================================
+// VIDEO CONSULTATION
+// ============================================
+
+model VideoSession {
+  id             String    @id @default(uuid())
+  appointmentId  String    @unique
+  twilioRoomSid  String?   @unique // Twilio Room SID
+  startedAt      DateTime?
+  endedAt        DateTime?
+  durationSeconds Int?     // Calculated duration
+  createdAt      DateTime  @default(now())
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@index([appointmentId])
+}
+
+// ============================================
+// FOLLOW-UPS
+// ============================================
+
+enum FollowUpStatus {
+  PENDING
+  BOOKED
+  IGNORED
+}
+
+model FollowUpRecommendation {
+  id                String         @id @default(uuid())
+  appointmentId     String         @unique // Original appointment
+  recommendedDate   DateTime?      // Suggested follow-up date
+  reason            String         @db.Text
+  status            FollowUpStatus @default(PENDING)
+  bookedAppointmentId String?      @unique // If follow-up is booked
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  appointment       Appointment  @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  bookedAppointment Appointment? @relation("FollowUpAppointment", fields: [bookedAppointmentId], references: [id], onDelete: SetNull)
+  doctor            DoctorProfile @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  doctorId          String
+
+  @@index([appointmentId])
+  @@index([status])
+}
+
+// ============================================
+// REVIEWS & RATINGS
+// ============================================
+
+model Review {
+  id            String   @id @default(uuid())
+  appointmentId String   @unique
+  patientId     String
+  doctorId      String
+  rating        Int      // 1-5
+  comment       String?  @db.Text
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  appointment Appointment   @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  patient     PatientProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor      DoctorProfile  @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@index([doctorId])
+  @@index([rating])
+  @@index([createdAt])
+}
+
+// ============================================
+// AUDIT LOGS
+// ============================================
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  userId       String
+  action       String   // e.g., "DOWNLOAD_REPORT", "UPDATE_PROFILE", "BOOK_APPOINTMENT"
+  resourceType String   // e.g., "MedicalReport", "Appointment"
+  resourceId   String?
+  ipAddress    String?
+  userAgent    String?
+  metadata     Json?    // Additional context (JSONB)
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([resourceType, resourceId])
+  @@index([action])
+}
+
+// ============================================
+// SUPPORT TICKETS
+// ============================================
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model SupportTicket {
+  id          String         @id @default(uuid())
+  userId      String
+  subject     String
+  description String         @db.Text
+  status      TicketStatus   @default(OPEN)
+  priority    TicketPriority @default(MEDIUM)
+  resolvedAt  DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([priority])
+}
+
+// ============================================
+// NOTIFICATIONS (In-App)
+// ============================================
+
+enum NotificationType {
+  APPOINTMENT_REMINDER
+  APPOINTMENT_CANCELLED
+  APPOINTMENT_RESCHEDULED
+  CONSULTATION_COMPLETED
+  PRESCRIPTION_READY
+  FOLLOW_UP_SUGGESTED
+  REVIEW_REQUEST
+  DOCTOR_APPROVED
+  DOCTOR_REJECTED
+  SYSTEM
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType
+  title     String
+  message   String           @db.Text
+  data      Json?            // Additional data (JSONB)
+  isRead    Boolean          @default(false)
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([createdAt])
+}
+
+model NotificationPreference {
+  id          String  @id @default(uuid())
+  userId      String  @unique
+  emailEnabled Boolean @default(true)
+  pushEnabled  Boolean @default(true)
+  smsEnabled   Boolean @default(false)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
