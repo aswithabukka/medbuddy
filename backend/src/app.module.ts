@@ -10,6 +10,8 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { UsersModule } from './users/users.module';
 import { PatientsModule } from './patients/patients.module';
+import { SpecialtiesModule } from './specialties/specialties.module';
+import { DoctorsModule } from './doctors/doctors.module';
 
 @Module({
   imports: [
@@ -34,6 +36,10 @@ import { PatientsModule } from './patients/patients.module';
     UsersModule,
 
     PatientsModule,
+
+    SpecialtiesModule,
+
+    DoctorsModule,
 
     // Feature modules will be added here
     // UsersModule,
