@@ -8,6 +8,8 @@ import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
+import { UsersModule } from './users/users.module';
+import { PatientsModule } from './patients/patients.module';
 
 @Module({
   imports: [
@@ -28,6 +30,10 @@ import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 
     // Authentication module
     AuthModule,
+
+    UsersModule,
+
+    PatientsModule,
 
     // Feature modules will be added here
     // UsersModule,
