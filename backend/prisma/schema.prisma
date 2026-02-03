@@ -7,6 +7,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 // ============================================
@@ -166,20 +167,23 @@ model DoctorProfile {
   clinicName       String?
   clinicAddress    String?
   licenseNumber    String?      // Medical license number
+  profilePhoto     String?      @db.Text // Base64 data URL of profile photo
+  certificates     Json         @default("[]") // Array of { name: string, data: string (base64) }
   verifiedAt       DateTime?
   rejectionReason  String?      @db.Text
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
-  user                  User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  specialties           DoctorSpecialty[]
-  languages             DoctorLanguage[]
-  availabilityTemplates DoctorAvailabilityTemplate[]
-  unavailableDates      DoctorUnavailableDate[]
-  appointments          Appointment[]
-  consultationNotes     ConsultationNote[]
-  prescriptions         Prescription[]
-  reviews               Review[]
+  user                    User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  specialties             DoctorSpecialty[]
+  languages               DoctorLanguage[]
+  availability            DoctorAvailability[] // New date-specific availability
+  availabilityTemplates   DoctorAvailabilityTemplate[] // Legacy weekly templates
+  unavailableDates        DoctorUnavailableDate[]
+  appointments            Appointment[]
+  consultationNotes       ConsultationNote[]
+  prescriptions           Prescription[]
+  reviews                 Review[]
   followUpRecommendations FollowUpRecommendation[]
 
   @@index([userId])
@@ -238,6 +242,32 @@ enum DayOfWeek {
   SUNDAY
 }
 
+enum RecurrenceType {
+  NONE    // One-time availability
+  DAILY   // Repeats daily
+  WEEKLY  // Repeats weekly
+  MONTHLY // Repeats monthly
+}
+
+model DoctorAvailability {
+  id             String         @id @default(uuid())
+  doctorId       String
+  date           DateTime       @db.Date // Specific date for this availability
+  startTime      String         // HH:MM format (e.g., "09:00")
+  endTime        String         // HH:MM format (e.g., "17:00")
+  recurrenceType RecurrenceType @default(NONE)
+  recurrenceEnd  DateTime?      @db.Date // When recurrence should end (optional)
+  isActive       Boolean        @default(true) // Can be used to soft-delete
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  doctor DoctorProfile @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@index([doctorId, date])
+  @@index([doctorId, isActive])
+}
+
+// Legacy model - keeping for backward compatibility
 model DoctorAvailabilityTemplate {
   id        String    @id @default(uuid())
   doctorId  String

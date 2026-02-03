@@ -43,6 +43,15 @@ export class CreateDoctorProfileDto {
   @IsString()
   timezone?: string;
 
+  @ApiPropertyOptional({ description: 'Base64 data URL of profile photo' })
+  @IsOptional()
+  @IsString()
+  profilePhoto?: string;
+
+  @ApiPropertyOptional({ description: 'Array of certificate objects { name, data (base64) }' })
+  @IsOptional()
+  certificates?: { name: string; data: string }[];
+
   @ApiPropertyOptional({ enum: DoctorStatus, default: DoctorStatus.PENDING })
   @IsOptional()
   @IsEnum(DoctorStatus)

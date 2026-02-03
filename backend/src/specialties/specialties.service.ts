@@ -20,16 +20,22 @@ export class SpecialtiesService {
       throw new ConflictException('Specialty with this name already exists');
     }
 
-    return this.prisma.specialty.create({
+    const specialty = await this.prisma.specialty.create({
       data: dto,
     });
+
+    return {
+      success: true,
+      message: 'Specialty created successfully',
+      data: specialty,
+    };
   }
 
   /**
    * Get all specialties
    */
   async findAll() {
-    return this.prisma.specialty.findMany({
+    const specialties = await this.prisma.specialty.findMany({
       orderBy: { name: 'asc' },
       include: {
         _count: {
@@ -39,6 +45,12 @@ export class SpecialtiesService {
         },
       },
     });
+
+    return {
+      success: true,
+      message: 'Specialties retrieved successfully',
+      data: specialties,
+    };
   }
 
   /**
@@ -60,7 +72,11 @@ export class SpecialtiesService {
       throw new NotFoundException('Specialty not found');
     }
 
-    return specialty;
+    return {
+      success: true,
+      message: 'Specialty retrieved successfully',
+      data: specialty,
+    };
   }
 
   /**
@@ -81,10 +97,16 @@ export class SpecialtiesService {
       }
     }
 
-    return this.prisma.specialty.update({
+    const specialty = await this.prisma.specialty.update({
       where: { id },
       data: dto,
     });
+
+    return {
+      success: true,
+      message: 'Specialty updated successfully',
+      data: specialty,
+    };
   }
 
   /**

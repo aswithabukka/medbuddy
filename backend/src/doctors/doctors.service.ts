@@ -9,11 +9,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateDoctorProfileDto } from './dto/create-doctor-profile.dto';
 import { UpdateDoctorProfileDto } from './dto/update-doctor-profile.dto';
 import { SetAvailabilityDto } from './dto/set-availability.dto';
+import { CreateDateAvailabilityDto } from './dto/create-date-availability.dto';
 import { AddUnavailableDateDto } from './dto/add-unavailable-date.dto';
 import { AddSpecialtyDto } from './dto/add-specialty.dto';
 import { AddLanguageDto } from './dto/add-language.dto';
 import { SearchDoctorsDto } from './dto/search-doctors.dto';
-import { UserRole, DoctorStatus } from '@prisma/client';
+import { UserRole, DoctorStatus, RecurrenceType, NotificationType } from '@prisma/client';
 
 @Injectable()
 export class DoctorsService {
@@ -105,6 +106,55 @@ export class DoctorsService {
   }
 
   /**
+   * Update doctor profile photo
+   * Pass null to remove the photo
+   */
+  async updateProfilePhoto(userId: string, profilePhoto: string | null) {
+    const profile = await this.prisma.doctorProfile.findUnique({
+      where: { userId },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('Doctor profile not found');
+    }
+
+    const updated = await this.prisma.doctorProfile.update({
+      where: { userId },
+      data: { profilePhoto },
+    });
+
+    return {
+      success: true,
+      message: profilePhoto ? 'Profile photo updated successfully' : 'Profile photo removed',
+      data: { profilePhoto: updated.profilePhoto },
+    };
+  }
+
+  /**
+   * Update doctor certificates
+   */
+  async updateCertificates(userId: string, certificates: { name: string; data: string }[]) {
+    const profile = await this.prisma.doctorProfile.findUnique({
+      where: { userId },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('Doctor profile not found');
+    }
+
+    await this.prisma.doctorProfile.update({
+      where: { userId },
+      data: { certificates } as any,
+    });
+
+    return {
+      success: true,
+      message: 'Certificates updated successfully',
+      data: { certificateCount: certificates.length },
+    };
+  }
+
+  /**
    * Get doctor profile with access control
    * - Doctors can view their own profile
    * - Patients can view approved doctor profiles
@@ -129,6 +179,9 @@ export class DoctorsService {
         },
         languages: true,
         availabilityTemplates: true,
+        availability: {
+          where: { isActive: true },
+        },
         unavailableDates: {
           where: {
             date: {
@@ -270,6 +323,234 @@ export class DoctorsService {
       success: true,
       message: 'Availability deleted successfully',
     };
+  }
+
+  /**
+   * Create date-specific availability with optional recurrence
+   */
+  async createDateAvailability(userId: string, dto: CreateDateAvailabilityDto) {
+    const profile = await this.prisma.doctorProfile.findUnique({
+      where: { userId },
+    });
+
+    if (!profile) {
+      throw new BadRequestException('Please create your doctor profile first');
+    }
+
+    // Validate time range
+    if (dto.startTime >= dto.endTime) {
+      throw new BadRequestException('Start time must be before end time');
+    }
+
+    const date = new Date(dto.date);
+
+    // Check if date is in the past
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (date < today) {
+      throw new BadRequestException('Cannot create availability for past dates');
+    }
+
+    // Validate recurrence end date if provided
+    if (dto.recurrenceEnd) {
+      const endDate = new Date(dto.recurrenceEnd);
+      if (endDate < date) {
+        throw new BadRequestException('Recurrence end date must be after start date');
+      }
+    }
+
+    const availability = await this.prisma.doctorAvailability.create({
+      data: {
+        doctorId: profile.id,
+        date,
+        startTime: dto.startTime,
+        endTime: dto.endTime,
+        recurrenceType: dto.recurrenceType || RecurrenceType.NONE,
+        recurrenceEnd: dto.recurrenceEnd ? new Date(dto.recurrenceEnd) : null,
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Availability created successfully',
+      data: availability,
+    };
+  }
+
+  /**
+   * Get all date-specific availability for a doctor
+   */
+  async getDateAvailability(userId: string) {
+    const profile = await this.prisma.doctorProfile.findUnique({
+      where: { userId },
+      include: {
+        availability: {
+          where: {
+            isActive: true,
+          },
+          orderBy: {
+            date: 'asc',
+          },
+        },
+      },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('Doctor profile not found');
+    }
+
+    return {
+      success: true,
+      data: profile.availability,
+    };
+  }
+
+  /**
+   * Delete date-specific availability
+   * mode: 'all' | 'this_only' | 'this_and_following'
+   * fromDate: the specific instance date being targeted (YYYY-MM-DD)
+   */
+  async deleteDateAvailability(userId: string, availabilityId: string, mode: string = 'all', fromDate?: string) {
+    const profile = await this.prisma.doctorProfile.findUnique({
+      where: { userId },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('Doctor profile not found');
+    }
+
+    const availability = await this.prisma.doctorAvailability.findFirst({
+      where: {
+        id: availabilityId,
+        doctorId: profile.id,
+      },
+    });
+
+    if (!availability) {
+      throw new NotFoundException('Availability not found or does not belong to you');
+    }
+
+    // One-time slots or mode=all: just soft-delete the whole record
+    if (availability.recurrenceType === RecurrenceType.NONE || mode === 'all') {
+      await this.prisma.doctorAvailability.update({
+        where: { id: availabilityId },
+        data: { isActive: false },
+      });
+      return { success: true, message: 'Availability deleted successfully' };
+    }
+
+    if (!fromDate) {
+      throw new BadRequestException('fromDate is required for recurring slot deletion');
+    }
+
+    const targetDate = new Date(fromDate);
+    targetDate.setHours(0, 0, 0, 0);
+    const startDate = new Date(availability.date);
+    startDate.setHours(0, 0, 0, 0);
+
+    if (mode === 'this_and_following') {
+      // If target is the start date itself, remove everything
+      if (targetDate.getTime() === startDate.getTime()) {
+        await this.prisma.doctorAvailability.update({
+          where: { id: availabilityId },
+          data: { isActive: false },
+        });
+      } else {
+        // Truncate: set recurrenceEnd to the day before targetDate
+        const newEnd = new Date(targetDate);
+        newEnd.setDate(newEnd.getDate() - 1);
+        await this.prisma.doctorAvailability.update({
+          where: { id: availabilityId },
+          data: { recurrenceEnd: newEnd },
+        });
+      }
+      return { success: true, message: 'This and all following slots removed' };
+    }
+
+    if (mode === 'this_only') {
+      // If target is the very first occurrence, shift start date forward
+      if (targetDate.getTime() === startDate.getTime()) {
+        const nextDate = this.getNextOccurrence(targetDate, availability.recurrenceType);
+        await this.prisma.doctorAvailability.update({
+          where: { id: availabilityId },
+          data: { date: nextDate },
+        });
+        return { success: true, message: 'This slot removed' };
+      }
+
+      // If target matches recurrenceEnd, just move end back one occurrence
+      if (availability.recurrenceEnd) {
+        const endDate = new Date(availability.recurrenceEnd);
+        endDate.setHours(0, 0, 0, 0);
+        if (targetDate.getTime() === endDate.getTime()) {
+          const prevDate = this.getPrevOccurrence(targetDate, availability.recurrenceType);
+          await this.prisma.doctorAvailability.update({
+            where: { id: availabilityId },
+            data: { recurrenceEnd: prevDate },
+          });
+          return { success: true, message: 'This slot removed' };
+        }
+      }
+
+      // Middle occurrence: split into two records
+      // 1) Truncate current record to end the day before targetDate
+      const dayBefore = new Date(targetDate);
+      dayBefore.setDate(dayBefore.getDate() - 1);
+      await this.prisma.doctorAvailability.update({
+        where: { id: availabilityId },
+        data: { recurrenceEnd: dayBefore },
+      });
+
+      // 2) Create new record starting from the next occurrence after targetDate
+      const nextDate = this.getNextOccurrence(targetDate, availability.recurrenceType);
+      await this.prisma.doctorAvailability.create({
+        data: {
+          doctorId: profile.id,
+          date: nextDate,
+          startTime: availability.startTime,
+          endTime: availability.endTime,
+          recurrenceType: availability.recurrenceType,
+          recurrenceEnd: availability.recurrenceEnd,
+          isActive: true,
+        },
+      });
+
+      return { success: true, message: 'This slot removed' };
+    }
+
+    return { success: false, message: 'Invalid delete mode' };
+  }
+
+  private getNextOccurrence(date: Date, recurrenceType: RecurrenceType): Date {
+    const next = new Date(date);
+    switch (recurrenceType) {
+      case RecurrenceType.DAILY:
+        next.setDate(next.getDate() + 1);
+        break;
+      case RecurrenceType.WEEKLY:
+        next.setDate(next.getDate() + 7);
+        break;
+      case RecurrenceType.MONTHLY:
+        next.setMonth(next.getMonth() + 1);
+        break;
+    }
+    return next;
+  }
+
+  private getPrevOccurrence(date: Date, recurrenceType: RecurrenceType): Date {
+    const prev = new Date(date);
+    switch (recurrenceType) {
+      case RecurrenceType.DAILY:
+        prev.setDate(prev.getDate() - 1);
+        break;
+      case RecurrenceType.WEEKLY:
+        prev.setDate(prev.getDate() - 7);
+        break;
+      case RecurrenceType.MONTHLY:
+        prev.setMonth(prev.getMonth() - 1);
+        break;
+    }
+    return prev;
   }
 
   /**
@@ -464,6 +745,22 @@ export class DoctorsService {
       success: true,
       message: 'Specialty removed from your profile',
     };
+  }
+
+  /**
+   * Get all languages for the current doctor
+   */
+  async getMyLanguages(userId: string) {
+    const profile = await this.prisma.doctorProfile.findUnique({
+      where: { userId },
+      include: { languages: true },
+    });
+
+    if (!profile) {
+      throw new NotFoundException('Doctor profile not found');
+    }
+
+    return { success: true, data: profile.languages };
   }
 
   /**
@@ -694,6 +991,9 @@ export class DoctorsService {
       where: { userId: doctorUserId },
       include: {
         availabilityTemplates: true,
+        availability: {
+          where: { isActive: true },
+        },
         unavailableDates: {
           where: {
             date: new Date(date),
@@ -722,23 +1022,59 @@ export class DoctorsService {
       };
     }
 
-    // Get day of week (0 = Sunday, 6 = Saturday)
     const targetDate = new Date(date);
-    const dayOfWeek = targetDate.getDay();
-
-    // Map JS day to Prisma DayOfWeek enum
+    const targetDow = targetDate.getUTCDay();
     const dayMapping = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
-    const dayName = dayMapping[dayOfWeek];
+    const dayName = dayMapping[targetDow];
 
-    // Get availability templates for this day
-    const availabilityForDay = profile.availabilityTemplates.filter(
-      (template) => template.dayOfWeek === dayName,
-    );
+    // Collect matching time windows from both old and new availability systems
+    const matchingWindows: { startTime: string; endTime: string }[] = [];
 
-    if (availabilityForDay.length === 0) {
+    // Legacy system: day-of-week templates
+    profile.availabilityTemplates
+      .filter((template) => template.dayOfWeek === dayName)
+      .forEach((template) => {
+        matchingWindows.push({ startTime: template.startTime, endTime: template.endTime });
+      });
+
+    // New system: date-specific availability with recurrence
+    profile.availability.forEach((avail) => {
+      const availDateStr = avail.date.toISOString().split('T')[0];
+
+      // Target is before the availability start date
+      if (date < availDateStr) return;
+
+      // Target is after recurrence end
+      if (avail.recurrenceEnd) {
+        const endStr = avail.recurrenceEnd.toISOString().split('T')[0];
+        if (date > endStr) return;
+      }
+
+      let matches = false;
+      switch (avail.recurrenceType) {
+        case RecurrenceType.NONE:
+          matches = date === availDateStr;
+          break;
+        case RecurrenceType.DAILY:
+          matches = true;
+          break;
+        case RecurrenceType.WEEKLY:
+          matches = targetDow === avail.date.getUTCDay();
+          break;
+        case RecurrenceType.MONTHLY:
+          matches = targetDate.getUTCDate() === avail.date.getUTCDate();
+          break;
+      }
+
+      if (matches) {
+        matchingWindows.push({ startTime: avail.startTime, endTime: avail.endTime });
+      }
+    });
+
+    if (matchingWindows.length === 0) {
       return {
         success: true,
-        message: 'Doctor is not available on this day of the week',
+        message: 'Doctor is not available on this date',
         data: {
           available: false,
           slots: [],
@@ -746,11 +1082,11 @@ export class DoctorsService {
       };
     }
 
-    // Generate 30-minute slots for each availability template
-    const slots: string[] = [];
-    availabilityForDay.forEach((template) => {
-      const [startHour, startMinute] = template.startTime.split(':').map(Number);
-      const [endHour, endMinute] = template.endTime.split(':').map(Number);
+    // Generate 30-minute slots for each matching window, deduplicating
+    const slotSet = new Set<string>();
+    matchingWindows.forEach((window) => {
+      const [startHour, startMinute] = window.startTime.split(':').map(Number);
+      const [endHour, endMinute] = window.endTime.split(':').map(Number);
 
       let currentHour = startHour;
       let currentMinute = startMinute;
@@ -759,10 +1095,8 @@ export class DoctorsService {
         currentHour < endHour ||
         (currentHour === endHour && currentMinute < endMinute)
       ) {
-        const timeSlot = `${String(currentHour).padStart(2, '0')}:${String(currentMinute).padStart(2, '0')}`;
-        slots.push(timeSlot);
+        slotSet.add(`${String(currentHour).padStart(2, '0')}:${String(currentMinute).padStart(2, '0')}`);
 
-        // Add 30 minutes
         currentMinute += 30;
         if (currentMinute >= 60) {
           currentMinute = 0;
@@ -771,7 +1105,7 @@ export class DoctorsService {
       }
     });
 
-    // TODO: Filter out slots that are already booked (will be implemented in appointments module)
+    const slots = Array.from(slotSet).sort();
 
     return {
       success: true,
@@ -781,6 +1115,50 @@ export class DoctorsService {
         slots,
         timezone: profile.timezone,
       },
+    };
+  }
+
+  /**
+   * Get all SYSTEM notifications for the current doctor (admin reminders)
+   */
+  async getMyNotifications(userId: string) {
+    const notifications = await this.prisma.notification.findMany({
+      where: {
+        userId,
+        type: NotificationType.SYSTEM,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return {
+      success: true,
+      data: notifications,
+    };
+  }
+
+  /**
+   * Mark a notification as read
+   */
+  async markNotificationRead(userId: string, notificationId: string) {
+    const notification = await this.prisma.notification.findUnique({
+      where: { id: notificationId },
+    });
+
+    if (!notification || notification.userId !== userId) {
+      throw new NotFoundException('Notification not found');
+    }
+
+    const updated = await this.prisma.notification.update({
+      where: { id: notificationId },
+      data: {
+        isRead: true,
+        readAt: new Date(),
+      },
+    });
+
+    return {
+      success: true,
+      data: updated,
     };
   }
 }

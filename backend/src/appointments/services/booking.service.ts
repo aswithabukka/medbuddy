@@ -120,27 +120,65 @@ export class BookingService {
         throw new ConflictException('Doctor is unavailable on this date');
       }
 
-      // 7. Validate that the slot matches doctor's availability template
-      const dayOfWeek = scheduledAt.getDay();
+      // 7. Validate that the slot matches doctor's availability (legacy or new system)
+      const dayOfWeek = scheduledAt.getUTCDay();
       const dayMapping = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
       const dayName = dayMapping[dayOfWeek];
+      const timeString = `${String(scheduledAt.getUTCHours()).padStart(2, '0')}:${String(scheduledAt.getUTCMinutes()).padStart(2, '0')}`;
+      const dateString = scheduledAt.toISOString().split('T')[0];
 
-      const timeString = `${String(scheduledAt.getHours()).padStart(2, '0')}:${String(scheduledAt.getMinutes()).padStart(2, '0')}`;
-
-      const availability = await this.prisma.doctorAvailabilityTemplate.findFirst({
+      // Check legacy availability templates
+      const legacyMatch = await this.prisma.doctorAvailabilityTemplate.findFirst({
         where: {
           doctorId: doctor.doctorProfile.id,
           dayOfWeek: dayName as any,
-          startTime: {
-            lte: timeString,
-          },
-          endTime: {
-            gt: timeString,
-          },
+          startTime: { lte: timeString },
+          endTime: { gt: timeString },
         },
       });
 
-      if (!availability) {
+      // Check new date-based availability with recurrence
+      let newSystemMatch = false;
+      if (!legacyMatch) {
+        const availabilities = await this.prisma.doctorAvailability.findMany({
+          where: {
+            doctorId: doctor.doctorProfile.id,
+            isActive: true,
+          },
+        });
+
+        for (const avail of availabilities) {
+          const availDateStr = avail.date.toISOString().split('T')[0];
+          if (dateString < availDateStr) continue;
+          if (avail.recurrenceEnd) {
+            const endStr = avail.recurrenceEnd.toISOString().split('T')[0];
+            if (dateString > endStr) continue;
+          }
+
+          let matches = false;
+          switch (avail.recurrenceType) {
+            case 'NONE':
+              matches = dateString === availDateStr;
+              break;
+            case 'DAILY':
+              matches = true;
+              break;
+            case 'WEEKLY':
+              matches = dayOfWeek === avail.date.getUTCDay();
+              break;
+            case 'MONTHLY':
+              matches = scheduledAt.getUTCDate() === avail.date.getUTCDate();
+              break;
+          }
+
+          if (matches && timeString >= avail.startTime && timeString < avail.endTime) {
+            newSystemMatch = true;
+            break;
+          }
+        }
+      }
+
+      if (!legacyMatch && !newSystemMatch) {
         throw new ConflictException('Doctor is not available at this time');
       }
 

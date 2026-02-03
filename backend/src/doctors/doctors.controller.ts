@@ -19,6 +19,7 @@ import { DoctorsService } from './doctors.service';
 import { CreateDoctorProfileDto } from './dto/create-doctor-profile.dto';
 import { UpdateDoctorProfileDto } from './dto/update-doctor-profile.dto';
 import { SetAvailabilityDto } from './dto/set-availability.dto';
+import { CreateDateAvailabilityDto } from './dto/create-date-availability.dto';
 import { AddUnavailableDateDto } from './dto/add-unavailable-date.dto';
 import { AddSpecialtyDto } from './dto/add-specialty.dto';
 import { AddLanguageDto } from './dto/add-language.dto';
@@ -92,6 +93,36 @@ export class DoctorsController {
     return this.doctorsService.createOrUpdateProfile(userId, dto);
   }
 
+  @Put('me/profile-photo')
+  @Roles(UserRole.DOCTOR)
+  @ApiOperation({ summary: 'Update my profile photo' })
+  @ApiResponse({ status: 200, description: 'Profile photo updated successfully' })
+  async updateProfilePhoto(
+    @CurrentUser('sub') userId: string,
+    @Body() dto: { profilePhoto: string | null },
+  ) {
+    return this.doctorsService.updateProfilePhoto(userId, dto.profilePhoto);
+  }
+
+  @Put('me/certificates')
+  @Roles(UserRole.DOCTOR)
+  @ApiOperation({ summary: 'Update my certificates' })
+  @ApiResponse({ status: 200, description: 'Certificates updated successfully' })
+  async updateCertificates(
+    @CurrentUser('sub') userId: string,
+    @Body() dto: { certificates: { name: string; data: string }[] },
+  ) {
+    return this.doctorsService.updateCertificates(userId, dto.certificates);
+  }
+
+  @Get('me/languages')
+  @Roles(UserRole.DOCTOR)
+  @ApiOperation({ summary: 'Get my languages' })
+  @ApiResponse({ status: 200, description: 'Returns my languages' })
+  async getMyLanguages(@CurrentUser('sub') userId: string) {
+    return this.doctorsService.getMyLanguages(userId);
+  }
+
   @Get(':userId/profile')
   @ApiOperation({ summary: 'Get doctor profile by user ID' })
   @ApiResponse({ status: 200, description: 'Returns doctor profile' })
@@ -137,6 +168,42 @@ export class DoctorsController {
     @Param('id') availabilityId: string,
   ) {
     return this.doctorsService.deleteAvailability(userId, availabilityId);
+  }
+
+  // ========== Date-Specific Availability Management (New System) ==========
+
+  @Post('me/date-availability')
+  @Roles(UserRole.DOCTOR)
+  @ApiOperation({ summary: 'Create date-specific availability with optional recurrence' })
+  @ApiResponse({ status: 201, description: 'Availability created successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid time range or date' })
+  async createDateAvailability(
+    @CurrentUser('sub') userId: string,
+    @Body() dto: CreateDateAvailabilityDto,
+  ) {
+    return this.doctorsService.createDateAvailability(userId, dto);
+  }
+
+  @Get('me/date-availability')
+  @Roles(UserRole.DOCTOR)
+  @ApiOperation({ summary: 'Get my date-specific availability' })
+  @ApiResponse({ status: 200, description: 'Returns date-specific availability' })
+  async getDateAvailability(@CurrentUser('sub') userId: string) {
+    return this.doctorsService.getDateAvailability(userId);
+  }
+
+  @Delete('me/date-availability/:id')
+  @Roles(UserRole.DOCTOR)
+  @ApiOperation({ summary: 'Delete date-specific availability with recurrence options' })
+  @ApiResponse({ status: 200, description: 'Availability deleted successfully' })
+  @ApiResponse({ status: 404, description: 'Availability not found' })
+  async deleteDateAvailability(
+    @CurrentUser('sub') userId: string,
+    @Param('id') availabilityId: string,
+    @Query('mode') mode: string = 'all',
+    @Query('fromDate') fromDate?: string,
+  ) {
+    return this.doctorsService.deleteDateAvailability(userId, availabilityId, mode, fromDate);
   }
 
   // ========== Unavailable Dates Management ==========
@@ -225,5 +292,26 @@ export class DoctorsController {
     @Param('languageId') languageId: string,
   ) {
     return this.doctorsService.removeLanguage(userId, languageId);
+  }
+
+  // ========== Notifications ==========
+
+  @Get('me/notifications')
+  @Roles(UserRole.DOCTOR)
+  @ApiOperation({ summary: 'Get my notifications (admin reminders)' })
+  @ApiResponse({ status: 200, description: 'Returns notifications' })
+  async getMyNotifications(@CurrentUser('sub') userId: string) {
+    return this.doctorsService.getMyNotifications(userId);
+  }
+
+  @Put('me/notifications/:id/read')
+  @Roles(UserRole.DOCTOR)
+  @ApiOperation({ summary: 'Mark a notification as read' })
+  @ApiResponse({ status: 200, description: 'Notification marked as read' })
+  async markNotificationRead(
+    @CurrentUser('sub') userId: string,
+    @Param('id') notificationId: string,
+  ) {
+    return this.doctorsService.markNotificationRead(userId, notificationId);
   }
 }
