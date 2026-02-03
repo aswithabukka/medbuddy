@@ -327,9 +327,6 @@ cd backend && npm run lint
 
 UNLICENSED - Private project
 
-## 👥 Team
-
-**MedBuddy Team**
 
 ---
 
