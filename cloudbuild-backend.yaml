@@ -1,0 +1,46 @@
+steps:
+  # Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/medbuddy/backend:$SHORT_SHA'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/medbuddy/backend:latest'
+      - '-f'
+      - 'backend/Dockerfile'
+      - './backend'
+
+  # Push the image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '--all-tags'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/medbuddy/backend'
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'medbuddy-backend'
+      - '--image=us-central1-docker.pkg.dev/$PROJECT_ID/medbuddy/backend:$SHORT_SHA'
+      - '--region=us-central1'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,REDIS_HOST=REDIS_HOST:latest,REDIS_PORT=REDIS_PORT:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,TWILIO_ACCOUNT_SID=TWILIO_ACCOUNT_SID:latest,TWILIO_API_KEY=TWILIO_API_KEY:latest,TWILIO_API_SECRET=TWILIO_API_SECRET:latest,GCP_PROJECT_ID=GCP_PROJECT_ID:latest,GCP_BUCKET_NAME=GCP_BUCKET_NAME:latest,GCP_SERVICE_ACCOUNT_KEY=GCP_SERVICE_ACCOUNT_KEY:latest'
+      - '--set-env-vars=NODE_ENV=production,PORT=8080'
+      - '--memory=2Gi'
+      - '--cpu=2'
+      - '--timeout=300'
+      - '--max-instances=10'
+      - '--min-instances=0'
+
+images:
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/medbuddy/backend:$SHORT_SHA'
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/medbuddy/backend:latest'
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+  logging: CLOUD_LOGGING_ONLY
