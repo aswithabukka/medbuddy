@@ -30,7 +30,7 @@ steps:
       - '--platform=managed'
       - '--allow-unauthenticated'
       - '--set-secrets=DATABASE_URL=DATABASE_URL:latest,REDIS_HOST=REDIS_HOST:latest,REDIS_PORT=REDIS_PORT:latest,JWT_SECRET=JWT_SECRET:latest,JWT_REFRESH_SECRET=JWT_REFRESH_SECRET:latest,TWILIO_ACCOUNT_SID=TWILIO_ACCOUNT_SID:latest,TWILIO_API_KEY=TWILIO_API_KEY:latest,TWILIO_API_SECRET=TWILIO_API_SECRET:latest,GCP_PROJECT_ID=GCP_PROJECT_ID:latest,GCP_BUCKET_NAME=GCP_BUCKET_NAME:latest,GCP_SERVICE_ACCOUNT_KEY=GCP_SERVICE_ACCOUNT_KEY:latest'
-      - '--set-env-vars=NODE_ENV=production,PORT=8080'
+      - '--set-env-vars=NODE_ENV=production'
       - '--memory=2Gi'
       - '--cpu=2'
       - '--timeout=300'
